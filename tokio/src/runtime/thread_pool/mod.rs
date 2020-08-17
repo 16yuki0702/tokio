@@ -21,6 +21,7 @@ use std::fmt;
 use std::future::Future;
 
 /// Work-stealing based thread pool for executing futures.
+#[derive(Clone)]
 pub(crate) struct ThreadPool {
     spawner: Spawner,
 }

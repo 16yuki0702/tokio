@@ -19,7 +19,7 @@ cfg_rt_core! {
 ///
 /// [`Runtime::handle`]: crate::runtime::Runtime::handle()
 #[derive(Debug, Clone)]
-pub struct Handle {
+pub(crate) struct Handle {
     pub(super) spawner: Spawner,
 
     /// Handles to the I/O drivers
@@ -69,7 +69,7 @@ impl Handle {
     ///     handle.enter(|| function_that_spawns(s));
     /// }
     /// ```
-    pub fn enter<F, R>(&self, f: F) -> R
+    pub(crate) fn enter<F, R>(&self, f: F) -> R
     where
         F: FnOnce() -> R,
     {
@@ -114,7 +114,7 @@ impl Handle {
     /// # });
     /// # }
     /// ```
-    pub fn current() -> Self {
+    pub(crate) fn current() -> Self {
         context::current().expect("not currently running on the Tokio runtime.")
     }
 
@@ -123,7 +123,7 @@ impl Handle {
     /// Returns an error if no Runtime has been started
     ///
     /// Contrary to `current`, this never panics
-    pub fn try_current() -> Result<Self, TryCurrentError> {
+    pub(crate) fn try_current() -> Result<Self, TryCurrentError> {
         context::current().ok_or(TryCurrentError(()))
     }
 }
@@ -167,7 +167,7 @@ cfg_rt_core! {
         /// [`Builder`]: struct@crate::runtime::Builder
         /// [`threaded_scheduler`]: fn@crate::runtime::Builder::threaded_scheduler
         /// [`basic_scheduler`]: fn@crate::runtime::Builder::basic_scheduler
-        pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
+        pub(crate) fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
         where
             F: Future + Send + 'static,
             F::Output: Send + 'static,
@@ -271,7 +271,7 @@ cfg_rt_core! {
         /// # th.join().unwrap();
         /// ```
         ///
-        pub fn block_on<F: Future>(&self, future: F) -> F::Output {
+        pub(crate) fn block_on<F: Future>(&self, future: F) -> F::Output {
             self.enter(|| {
                 let mut enter = crate::runtime::enter(true);
                 enter.block_on(future).expect("failed to park thread")
@@ -341,7 +341,7 @@ cfg_blocking! {
         /// # Ok(())
         /// # }
         /// ```
-        pub fn spawn_blocking<F, R>(&self, f: F) -> JoinHandle<R>
+        pub(crate) fn spawn_blocking<F, R>(&self, f: F) -> JoinHandle<R>
         where
             F: FnOnce() -> R + Send + 'static,
             R: Send + 'static,
@@ -354,7 +354,7 @@ cfg_blocking! {
 }
 
 /// Error returned by `try_current` when no Runtime has been started
-pub struct TryCurrentError(());
+pub(crate) struct TryCurrentError(());
 
 impl fmt::Debug for TryCurrentError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

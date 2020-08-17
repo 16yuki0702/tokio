@@ -40,9 +40,8 @@ fn basic_scheduler_remote_spawn(bench: &mut Bencher) {
         .basic_scheduler()
         .build()
         .unwrap();
-    let handle = runtime.handle();
     bench.iter(|| {
-        let h = handle.spawn(work());
+        let h = runtime.spawn(work());
         black_box(h);
     });
 }
@@ -52,9 +51,8 @@ fn threaded_scheduler_remote_spawn(bench: &mut Bencher) {
         .threaded_scheduler()
         .build()
         .unwrap();
-    let handle = runtime.handle();
     bench.iter(|| {
-        let h = handle.spawn(work());
+        let h = runtime.spawn(work());
         black_box(h);
     });
 }

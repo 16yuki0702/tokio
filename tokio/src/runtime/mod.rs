@@ -212,7 +212,7 @@ pub(crate) mod enter;
 use self::enter::enter;
 
 mod handle;
-pub use self::handle::{Handle, TryCurrentError};
+use self::handle::Handle;
 
 mod io;
 
@@ -239,6 +239,8 @@ cfg_rt_threaded! {
 cfg_rt_core! {
     use crate::task::JoinHandle;
 }
+
+use crate::loom::sync::{Arc, Mutex};
 
 use std::future::Future;
 use std::time::Duration;
@@ -284,15 +286,15 @@ pub struct Runtime {
 }
 
 /// The runtime executor is either a thread-pool or a current-thread executor.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum Kind {
     /// Not able to execute concurrent tasks. This variant is mostly used to get
     /// access to the driver handles.
-    Shell(Shell),
+    Shell(Arc<Mutex<Shell>>),
 
     /// Execute all tasks on the current-thread.
     #[cfg(feature = "rt-core")]
-    Basic(BasicScheduler<time::Driver>),
+    Basic(Arc<Mutex<BasicScheduler<time::Driver>>>),
 
     /// Execute tasks across multiple threads.
     #[cfg(feature = "rt-threaded")]
@@ -397,7 +399,11 @@ impl Runtime {
             Kind::Shell(_) => panic!("task execution disabled"),
             #[cfg(feature = "rt-threaded")]
             Kind::ThreadPool(exec) => exec.spawn(future),
-            Kind::Basic(exec) => exec.spawn(future),
+            Kind::Basic(exec) => {
+                // TODO(lucio): take advantage of `Arc::get_mut` & `Mutex::get_mut` to fast path
+                let exec = exec.lock().unwrap();
+                exec.spawn(future)
+            }
         }
     }
 
@@ -435,13 +441,18 @@ impl Runtime {
     /// ```
     ///
     /// [handle]: fn@Handle::block_on
-    pub fn block_on<F: Future>(&mut self, future: F) -> F::Output {
-        let kind = &mut self.kind;
-
-        self.handle.enter(|| match kind {
-            Kind::Shell(exec) => exec.block_on(future),
+    pub fn block_on<F: Future>(&self, future: F) -> F::Output {
+        self.handle.enter(|| match &self.kind {
+            Kind::Shell(exec) => {
+                let mut exec = exec.lock().unwrap();
+                exec.block_on(future)
+            }
             #[cfg(feature = "rt-core")]
-            Kind::Basic(exec) => exec.block_on(future),
+            Kind::Basic(exec) => {
+                // TODO(lucio): take advantage of `Arc::get_mut` & `Mutex::get_mut` to fast path
+                let mut exec = exec.lock().unwrap();
+                exec.block_on(future)
+            }
             #[cfg(feature = "rt-threaded")]
             Kind::ThreadPool(exec) => exec.block_on(future),
         })
@@ -484,27 +495,6 @@ impl Runtime {
         F: FnOnce() -> R,
     {
         self.handle.enter(f)
-    }
-
-    /// Return a handle to the runtime's spawner.
-    ///
-    /// The returned handle can be used to spawn tasks that run on this runtime, and can
-    /// be cloned to allow moving the `Handle` to other threads.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tokio::runtime::Runtime;
-    ///
-    /// let rt = Runtime::new()
-    ///     .unwrap();
-    ///
-    /// let handle = rt.handle();
-    ///
-    /// handle.spawn(async { println!("hello"); });
-    /// ```
-    pub fn handle(&self) -> &Handle {
-        &self.handle
     }
 
     /// Shutdown the runtime, waiting for at most `duration` for all spawned
@@ -576,5 +566,15 @@ impl Runtime {
     /// ```
     pub fn shutdown_background(self) {
         self.shutdown_timeout(Duration::from_nanos(0))
+    }
+}
+
+impl Clone for Runtime {
+    fn clone(&self) -> Self {
+        Self {
+            kind: self.kind.clone(),
+            handle: self.handle.clone(),
+            blocking_pool: self.blocking_pool.clone(),
+        }
     }
 }

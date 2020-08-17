@@ -14,9 +14,10 @@ use std::collections::VecDeque;
 use std::fmt;
 use std::time::Duration;
 
+#[derive(Clone)]
 pub(crate) struct BlockingPool {
     spawner: Spawner,
-    shutdown_rx: shutdown::Receiver,
+    shutdown_rx: Arc<Option<shutdown::Receiver>>,
 }
 
 #[derive(Clone)]
@@ -110,7 +111,7 @@ impl BlockingPool {
                     thread_cap,
                 }),
             },
-            shutdown_rx,
+            shutdown_rx: Arc::new(Some(shutdown_rx)),
         }
     }
 
@@ -135,9 +136,13 @@ impl BlockingPool {
 
         drop(shared);
 
-        if self.shutdown_rx.wait(timeout) {
-            for handle in workers.drain() {
-                let _ = handle.join();
+        if let Some(rx) = Arc::get_mut(&mut self.shutdown_rx) {
+            let mut rx = rx.take().unwrap();
+
+            if rx.wait(timeout) {
+                for handle in workers.drain() {
+                    let _ = handle.join();
+                }
             }
         }
     }
